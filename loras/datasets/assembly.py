@@ -113,17 +113,23 @@ class Assembly101Dataset(torch.utils.data.Dataset):
             if sample['video_id'] in ['nusar-2021_action_both_9026-b04b_9026_user_id_2021-02-03_163855.pkl']:
                 continue
 
-            # Where to find the poses data
-            path_to_pose = os.path.join(poses_path, f"{sample['video_id']}.pkl")
-            if os.path.exists(path_to_pose):
-                sample['path_to_pose'] = path_to_pose
-            else:
-                print('INFO: skipped sample: cant find poses')
-                continue
-
             segm_filename = f"{sample['action_type']}_{sample['video_id']}.txt"
             segm_path = os.path.join(annotations_path, "coarse_labels", segm_filename)
             segm, start_frame, end_frame = load_segmentation(segm_path, actions, config.target_label)
+            delta = 0
+
+            # Where to find the poses data
+            path_to_pose = os.path.join(poses_path, f"{sample['video_id']}.pkl")
+            if os.path.exists(path_to_pose):
+
+                sample['path_to_pose'] = path_to_pose
+                with open(path_to_pose, "rb") as f:
+                    pose = pickle.load(f)
+                    sample['pose'] = pose['data']
+
+            else:
+                print('INFO: skipped sample: cant find poses')
+                continue
 
             max_len = max(max_len, len(segm))
             min_len = min(min_len, len(segm))
@@ -157,7 +163,7 @@ class Assembly101Dataset(torch.utils.data.Dataset):
         path_to_pose = sample['path_to_pose']
 
         features = load_frame_features(self.views, view, start_frame, end_frame, video_id)
-        poses =  torch.zeros((1, 1, 1)) #load_frame_poses(path_to_pose, start_frame, end_frame)
+        poses =  torch.zeros((1,1)) #load_frame_poses(path_to_pose, start_frame, end_frame)
         return features, poses, sample['segm']
 
     def __len__(self):

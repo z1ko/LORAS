@@ -18,9 +18,10 @@ class LORAS(lightning.LightningModule):
 
         # Initial embeddings reduction
         self.input_module = nn.Sequential(
-            nn.LayerNorm(config.frame_features),
             nn.Linear(config.frame_features, config.model_dim),
-            #nn.Dropout(config.dropout),
+            nn.LayerNorm(config.model_dim),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
         )
 
         self.temporal = LRUBlock(
