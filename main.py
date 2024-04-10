@@ -12,12 +12,12 @@ print(config)
 dataset = Assembly101(config)
 model = LORAS(config)
 
-
 # Stop training if the validation loss doesn't decrease
 early_stopping = EarlyStopping(monitor='val/loss_total', patience=3, mode='min')
 
 logger = WandbLogger(name='LORAS', save_dir='runs')
 trainer = Trainer(
+    accumulate_grad_batches=config.accumulate_grad_batches,
     max_epochs=config.train_epochs,
     callbacks=[early_stopping], 
     logger=logger

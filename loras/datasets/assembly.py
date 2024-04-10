@@ -1,199 +1,86 @@
-from lightning.pytorch.utilities.types import TRAIN_DATALOADERS
 import torch
 import lightning
 import os
 import pandas
 import numpy
 import lmdb
+import json
 import pickle
+import argparse
+import einops
 
+from lightning.pytorch.utilities.types import TRAIN_DATALOADERS
 from types import SimpleNamespace
+from operator import itemgetter
+from tqdm import tqdm
 
 import torch.utils
 import torch.utils.data
 
-def load_frame_features(databases, view, start_frame, end_frame, id):
-    """ Load a subset of frame embeddings
-    """
-    elements = []
-    with databases[view].begin(write=False) as e:
-        for i in range(start_frame, end_frame):
-            key = os.path.join(id, f'{view}/{view}_{i:010d}.jpg')
-            frame_data = e.get(key.strip().encode('utf-8'))
-            if frame_data is None:
-                print(f"[!] No data found for key={key}.")
-                exit(2)
-
-            frame_data = numpy.frombuffer(frame_data, 'float32')
-            elements.append(frame_data)
-
-    features = numpy.array(elements) # [T, D]
-    return torch.tensor(features)
-
-
-def load_frame_poses(path_to_poses, start_frame, end_frame):
-    """ Load a subset of frame skeletal poses
-    """
-    with open(path_to_poses, "rb") as f:
-        sample = pickle.load(f)
-
-    # Changes frequency from 60fps to 30fps
-    poses = sample['data'][:, start_frame*2:end_frame*2:2, :, :]
-    assert(poses.shape[1] != 0)
-    return torch.tensor(poses)
-
-
-def load_segmentation(path_to_segm, actions, target):
-    """ Load a sample segmentation
-    """
-    labels = []
-    start_indices = []
-    end_indices = []
-
-    with open(path_to_segm, 'r') as f:
-        lines = list(map(lambda s: s.split("\n"), f.readlines()))
-        for line in lines:
-            start, end, lbl = line[0].split("\t")[:-1]
-            start_indices.append(int(start))
-            end_indices.append(int(end))
-
-            action_id = actions.loc[actions['action_cls'] == lbl, f'{target}_id']
-            segm_len = int(end) - int(start)
-            labels.append(numpy.full(segm_len, fill_value=action_id.item()))
-
-    segmentation = numpy.concatenate(labels)
-    num_frames = segmentation.shape[0]
-    
-    # start and end frame idx @30fps
-    start_frame = min(start_indices)
-    end_frame = max(end_indices)
-    assert num_frames == (end_frame-start_frame), \
-        "Length of Segmentation doesn't match with clip length."
- 
-    return segmentation, start_frame, end_frame
-
-
-# Should be able to produce frames embeddings+poses and coarse labels 
 class Assembly101Dataset(torch.utils.data.Dataset):
     def __init__(self, mode, config):
-        super().__init__()
-        path_to_data = 'data/Assembly101'
-
-        # Load frames database
-        self.views = {
-            view: lmdb.open(f'{path_to_data}/TSM/{view}', readonly=True, lock=False) 
-            for view in config.views
-        }
-        
-        self.samples = self.make_dataset(path_to_data, mode, config)
-
-    def make_dataset(self, path_to_data, mode, config):
-        annotations_path = os.path.join(path_to_data, 'coarse-annotations')
-        poses_path = os.path.join(path_to_data, 'poses', mode)
-
-        # Load samples split
-        split_path = os.path.join(path_to_data, f'{mode}.csv')
-        split = pandas.read_csv(split_path)
-
-        # Load actions dictionary
-        actions_path = os.path.join(path_to_data, 'coarse-annotations', 'actions.csv')
-        actions = pandas.read_csv(actions_path)
-
-
-        dataset = []
-        max_len, min_len = 0, 1e9
-        for _, entry in split.iterrows():
-            sample = entry.to_dict()
-
-            if sample['view'] not in config.views:
-                #print('INFO: skipped sample: not in selected views')
-                continue
-
-            # Skip strange samples
-            if sample['video_id'] in ['nusar-2021_action_both_9026-b04b_9026_user_id_2021-02-03_163855.pkl']:
-                continue
-
-            segm_filename = f"{sample['action_type']}_{sample['video_id']}.txt"
-            segm_path = os.path.join(annotations_path, "coarse_labels", segm_filename)
-            segm, start_frame, end_frame = load_segmentation(segm_path, actions, config.target_label)
-            delta = 0
-
-            # Where to find the poses data
-            path_to_pose = os.path.join(poses_path, f"{sample['video_id']}.pkl")
-            if os.path.exists(path_to_pose):
-
-                sample['path_to_pose'] = path_to_pose
-                with open(path_to_pose, "rb") as f:
-                    pose = pickle.load(f)
-                    sample['pose'] = pose['data']
-
+        self.items = []
+        split_path = os.path.join('data/Assembly101/processed', mode)
+        for item in tqdm(os.listdir(split_path)):
+            item_path = os.path.join(split_path, item)
+            
+            # No clips
+            if config.clip_size == 'None':
+                self.items.append((item_path, None))
             else:
-                print('INFO: skipped sample: cant find poses')
-                continue
-
-            max_len = max(max_len, len(segm))
-            min_len = min(min_len, len(segm))
-
-            # Only use clip size if in training
-            if mode == 'train' and config.clip_size is not None:
-                for beg in range(0, len(segm) - config.clip_size, config.clip_size):
-                    end = beg + config.clip_size
-
-                    sample['segm'] = torch.tensor(segm[beg:end]).long()
-                    sample['start_frame'] = start_frame + beg
-                    sample['end_frame'] = start_frame + end
-                    dataset.append(sample)
-
-            else:
-                sample['segm'] = torch.tensor(segm).long()
-                sample['start_frame'] = start_frame
-                sample['end_frame'] = end_frame
-                dataset.append(sample)
-
-        print(f'dataset length: {len(dataset)}, max_frames: {max_len}, min_frames: {min_len}')
-        return dataset
+                frames = int(item.split('-')[0])
+                for beg in range(0, frames - config.clip_size, config.clip_size):
+                    self.items.append((item_path, (beg, beg + config.clip_size)))
 
     def __getitem__(self, idx):
-        sample = self.samples[idx]
+        path, clip = self.items[idx]
+        with open(path, 'rb') as f:
+            sample = pickle.load(f)
 
-        view = sample['view']
-        start_frame = sample['start_frame']
-        end_frame = sample['end_frame']
-        video_id = sample['video_id']
-        path_to_pose = sample['path_to_pose']
+        labels = torch.tensor(sample['fine-labels']).long()
+        embeddings = torch.tensor(sample['embeddings'], dtype=torch.float32)
+        poses = torch.tensor(sample['poses'],dtype=torch.float32)
 
-        features = load_frame_features(self.views, view, start_frame, end_frame, video_id)
-        poses =  torch.zeros((1,1)) #load_frame_poses(path_to_pose, start_frame, end_frame)
-        return features, poses, sample['segm']
+        if clip is not None:
+            beg, end = clip
+
+            labels = labels[beg:end, ...]
+            embeddings = embeddings[beg:end, ...]
+            poses = poses[beg:end, ...]
+
+        return embeddings, poses, labels
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.items)
 
 class Assembly101(lightning.LightningDataModule):
     def __init__(self, config):
         super().__init__()
-        self.validation = Assembly101Dataset('val', config)
+        self.validation = Assembly101Dataset('validation', config)
         self.training = Assembly101Dataset('train', config)
         self.config = config
 
     @staticmethod
     def collate(data):
-        features, poses, segmentations = [], [], []
-        for f, p, s in data:
-            features.append(f)
+        embeddings, poses, labels = [], [], []
+        for e, p, l in data:
+            embeddings.append(e)
             poses.append(p)
-            segmentations.append(s)
+            labels.append(l)
         
-        features = torch.nn.utils.rnn.pad_sequence(features, batch_first=True)
+        embeddings = torch.nn.utils.rnn.pad_sequence(embeddings, batch_first=True)
         poses = torch.nn.utils.rnn.pad_sequence(poses, batch_first=True)
-        segmentations = torch.nn.utils.rnn.pad_sequence(segmentations, batch_first=True, padding_value=-100)
-        return features, poses, segmentations
+        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
+
+        return embeddings, poses, labels[..., 1] # take only the action for now
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
             self.training,
             self.config.batch_size,
+            num_workers=self.config.num_workers,
             shuffle=True,
+            collate_fn=Assembly101.collate,
             pin_memory=True,
         )
 
@@ -201,18 +88,171 @@ class Assembly101(lightning.LightningDataModule):
         return torch.utils.data.DataLoader(
             self.validation,
             self.config.test_batch_size,
+            num_workers=self.config.num_workers,
             collate_fn=Assembly101.collate,
             pin_memory=True,
         )
 
+# =============================================================================================
+# PREPROCESS
+
+def gather_split_annotations(annotations, all_frames_dict, jsons_list_poses):
+    counters = 0 # Counting total number of segments in all_frames_dict
+    for _, aData in tqdm(annotations.iterrows(), 'Populating Dataset', total=len(annotations)):
+        # For each segment, find the video id first
+        video_id_json = aData.video.strip() + '.json'
+        # If the hand poses for the video is not available, skip it
+        if not video_id_json in jsons_list_poses:
+            continue
+        
+        # Store segment information as a dictionary
+        curr_data = dict()
+        curr_data['start_frame'] = aData.start_frame
+        curr_data['end_frame'] = aData.end_frame
+        curr_data['action'] = aData.action_id
+        curr_data['noun'] = aData.noun_id
+        curr_data['verb'] = aData.verb_id
+        curr_data['action_cls'] = aData.action_cls
+        curr_data['toy_id'] = aData.toy_id
+        curr_data['shared'] = aData.is_shared
+
+        # Add the dictionary to the list of segments for the video
+        all_frames_dict[video_id_json].append(curr_data)
+        counters += 1
+
+    print("Inside gather_split_annotations(): ", counters)
+
+def preprocess(args):
+    columns = [
+        "id", "video", "start_frame", "end_frame", "action_id", "verb_id", "noun_id",
+        "action_cls", "verb_cls", "noun_cls", "toy_id", "toy_name", "is_shared"
+    ]
+
+    jsons_list_poses = os.listdir(args.path_to_poses)
+    jsons_list_poses.sort()
+
+    # Load database for views
+    tsm_path = os.path.join(args.path_to_tsm, args.view)
+    tsm = lmdb.open(tsm_path, readonly=True, lock=False)
+
+    splits = ['train', 'validation']
+    for split in splits:
+
+        # Create output directory
+        output_path = os.path.join(args.output, split)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        annotations_path = os.path.join(args.path_to_metadata, f'{split}.csv')
+        annotations = pandas.read_csv(annotations_path, header=0, low_memory=False, names=columns)
+        all_frames_dict = dict() # all_frames_dict is a dictionary keeping a list of segments against every video id
+
+        # Initiate empty list for each video id in  all_frames_dict
+        for kli in range(len(jsons_list_poses)):
+            all_frames_dict[jsons_list_poses[kli]] = []
+
+        gather_split_annotations(annotations, all_frames_dict, jsons_list_poses)
+
+        # Remove unwanted data
+        #removed_counter = 0
+        #for key, data in list(all_frames_dict):
+        #    if not args.keep_zero_shot:
+        #        if not data['shared']:
+        #            del all_frames_dict[key]
+        #            removed_counter += 1
+        #
+        #print(f'removed unwanted data: {removed_counter}')
+
+        for klk in range(len(jsons_list_poses)):
+            video_id = jsons_list_poses[klk].strip().split('.')[0]
+
+            # Get the list of segments for each video
+            all_segments = all_frames_dict[jsons_list_poses[klk]]
+            if len(all_segments) == 0:
+                continue
+
+            # Sort the segments based on start_frame
+            all_segments = sorted(all_segments, key=itemgetter('start_frame'))
+
+            # Read handpose file for the video and get list of frames with handposes for them
+            poses_path = os.path.join(args.path_to_poses, jsons_list_poses[klk])
+            with open(poses_path) as f:
+                poses = json.load(f)
+
+            # Convert json file to numpy array
+            hands = []
+            for hand in range(0, 2):
+                hands.append(
+                    numpy.stack([numpy.array(poses[i]['landmarks'][str(hand)], dtype='float32') for i in range(len(poses))]))
+    
+            # NOTE: Change framerate to 30 fps
+            poses_data = numpy.stack(hands)
+            poses_data = poses_data[:, ::2, :, :]
+            poses_data = einops.rearrange(poses_data, 'H T ... -> T H ...')
+            frames_count = poses_data.shape[0]
+
+            # Store also frame embeddings
+            embeddings = numpy.zeros((frames_count, 2048))
+            database_frames_count = 0
+
+            complete = True
+            with tsm.begin(write=False) as e:
+                for i in range(0, frames_count):
+                    # example: 'nusar-2021_action_both_9044-a08_9044_user_id_2021-02-19_083738/C10095_rgb/C10095_rgb_0000011685.jpg'
+                    key = os.path.join(video_id, f'{args.view}/{args.view}_{(i+1):010d}.jpg')
+                    frame_data = e.get(key.strip().encode('utf-8'))
+                    if frame_data is None:
+                        print(f"[!] No data found for key={key}.")
+                        complete = False
+                        break
+
+                    embeddings[i, :] = numpy.frombuffer(frame_data, 'float32')
+                    database_frames_count += 1
+
+            # Skip sample is frames are missing
+            if not complete:
+                # If only the ending frames are missing, continue
+                if frames_count - database_frames_count < 100:
+                    embeddings = embeddings[:database_frames_count, ...]
+                    poses_data = poses_data[:database_frames_count, ...]
+                    frames_count = database_frames_count
+                else:
+                    print(f'[!] missing frames for {video_id}, skipping sample')
+                    continue
+
+            # Generate fine labels
+            labels = numpy.zeros((frames_count, 3))
+            for segment in all_segments:
+                beg, end = segment['start_frame'], segment['end_frame']
+                labels[beg:end, 0] = int(segment['action']) + 1
+                labels[beg:end, 1] = int(segment['verb'])   + 1
+                labels[beg:end, 2] = int(segment['noun'])   + 1
+
+            result = {
+                'video_id': video_id,
+                'view': args.view,
+                'fine-labels': labels,
+                'embeddings': embeddings,
+                'poses': poses_data,
+            }
+
+            # Save complete sample in the output folder
+            result_path = os.path.join(output_path, video_id + '.pkl')
+            with open(result_path, 'wb') as f:
+                pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
 
-    dataset = Assembly101Dataset('train', SimpleNamespace(
-        views=['C10095_rgb'],
-        clip_size=128,
-        target_label='action'
-    ))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--path_to_metadata', type=str, default='data/Assembly101/metadata')
+    parser.add_argument('--path_to_poses',    type=str, default='data/Assembly101/poses@60fps')
+    parser.add_argument('--path_to_tsm',      type=str, default='data/Assembly101/TSM')
+    parser.add_argument('--output',           type=str, default='data/Assembly101/processed')
     
-    sample = dataset[0]
-    a = 0
+    # What view to consider
+    parser.add_argument('--view', type=str, default='C10095_rgb')
+    # Keep zero-shot elements
+    parser.add_argument('--keep_zero_shot', action='store_true')
+
+    args = parser.parse_args()
+    preprocess(args)

@@ -1,18 +1,21 @@
+accumulate_grad_batches: 4
+num_workers: 8
+
 views: ['C10095_rgb']
-clip_size: 1800
+clip_size: None
 target_label: 'action'
 learning_rate: 0.01
 weight_decay: 0.0005
 scheduler_step: 100
-classes: 202
-batch_size: 16
+classes: 25
+batch_size: 1
 test_batch_size: 1
 cemse_alpha: 0.17
 train_epochs: 200
 frame_features: 2048
 pose_joint_features: 3
 pose_joint_count: 42
-model_dim: 1024
+model_dim: 256
 dropout: 0.20
 temporal_layers_count: 2
 temporal_state_dim: 1024
