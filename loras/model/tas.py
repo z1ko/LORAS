@@ -45,7 +45,10 @@ class LORAS(lightning.LightningModule):
             output_dim=config.model_dim, 
             state_dim=config.temporal_state_dim, 
             layers_count=config.temporal_layers_count, 
-            dropout=config.dropout
+            dropout=config.dropout,
+            phase_max=config.lru_max_phase,
+            r_min=config.lru_min_radius,
+            r_max=config.lru_max_radius,
         )
 
     def initialize_inference(self):

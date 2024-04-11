@@ -29,8 +29,8 @@ trainer = Trainer(
 )
 
 # Test framerate with test on a 2 frames tensor to simulate inference
-elapsed, fps = model.benchmark_framerate()
-print(f'elapsed ms for frame: {elapsed}, fps: {fps}')
+#elapsed, fps = model.benchmark_framerate()
+#print(f'elapsed ms for frame: {elapsed}, fps: {fps}')
 
 trainer.fit(
     model, 
