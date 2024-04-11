@@ -1,5 +1,5 @@
 accumulate_grad_batches: 4
-num_workers: 8
+num_workers: 1
 
 views: ['C10095_rgb']
 clip_size: None
@@ -7,7 +7,6 @@ target_label: 'action'
 learning_rate: 0.01
 weight_decay: 0.0005
 scheduler_step: 100
-classes: 25
 batch_size: 1
 test_batch_size: 1
 cemse_alpha: 0.17
@@ -21,4 +20,4 @@ temporal_layers_count: 2
 temporal_state_dim: 1024
 
 categories: ['verb', 'noun']
-categories_num_classes: [25, 90]
+categories_num_classes: [25, 91]

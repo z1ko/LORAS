@@ -21,6 +21,7 @@ class LRU(nn.Module):
         **kwargs
     ):
         super().__init__()
+        self.inference = False
 
         self.state_dim = state_dim
         self.state = torch.complex(torch.zeros(state_dim), torch.zeros(state_dim))
@@ -70,26 +71,22 @@ class LRU(nn.Module):
         inner_states = torch.vmap(inner_state_fn)(B_elems)
         return (inner_states @ self.C.T).real
 
-    def forward_with_state(self, x, state):  # (J, F), (J, S) dove F = S
+    def initialize_inference(self):
+        self.inference = True
 
-        # TODO: (performance) cache instantiation of matrices
         L_mod = torch.exp(-torch.exp(self.nu_log))
         L_re = L_mod * torch.cos(torch.exp(self.theta_log))
         L_im = L_mod * torch.sin(torch.exp(self.theta_log))
-        L_diag = torch.complex(L_re, L_im).to(self.B.device)
 
+        self.L_diag_cache = torch.complex(L_re, L_im).to(self.B.device)
         G_norm = torch.exp(self.gamma_log).unsqueeze(-1).to(self.B.device)
-        B_norm = self.B * G_norm
+        self.B_norm_cache = self.B * G_norm
 
+    def forward_with_state(self, x, state):  # F, S dove F = S
+        assert(self.inference)
         y = torch.zeros_like(x)
-        
-        # state = L_diag * state + B_norm @ x.to(dtype=self.B.dtype)
-        # y = (self.C @ state).real
-        
-        for i in range(x.shape[0]):
-            state[i] = L_diag * state[i] + B_norm @ x[i].to(dtype=self.B.dtype)
-            y[i] = (self.C @ state[i]).real
-
+        state = self.L_diag_cache * state + self.B_norm_cache @ x.to(dtype=self.B.dtype)
+        y = (self.C @ state).real
         return y, state
 
 class LRUBlock(nn.Module):
@@ -116,28 +113,30 @@ class LRUBlock(nn.Module):
         self.input_proj = nn.Linear(self.input_dim, self.state_dim)
         self.output_proj = nn.Linear(self.state_dim, self.output_dim)
 
-        # Create all layers
+        self.norms = nn.ModuleList()
         self.layers = nn.ModuleList()
+        self.glus = nn.ModuleList()
+
+        # Create all layers
         for _ in range(self.layers_count):
-            self.layers.append(
-                nn.Sequential(
-                    nn.LayerNorm(self.state_dim),
-                    LRU(self.state_dim, **kwargs),
-                    GLU(self.state_dim, self.dropout)
-                )
-            )
+            self.norms.append(nn.LayerNorm(self.state_dim))
+            self.layers.append(LRU(self.state_dim, **kwargs))
+            self.glus.append(GLU(self.state_dim, self.dropout))
 
     def initialize_inference(self):
         self.inference = True
-        for layer in self.layers:
-            layer[1].initialize_inference()
+        for lru in self.layers:
+            lru.initialize_inference()
 
     def forward(self, x):
         x = self.input_proj(x)
 
-        for layer in self.layers:
+        for norm, lru, glu in zip(self.norms, self.layers, self.glus):
             residual = x
-            x = layer(x) + residual
+            x = norm(x)
+            x = lru(x)
+            x = glu(x)
+            x = x + residual
 
         x = self.output_proj(x)
         return x
@@ -148,9 +147,11 @@ class LRUBlock(nn.Module):
 
         x = self.input_proj(x)
         
-        for layer in self.layers:
+        for norm, lru, glu in zip(self.norms, self.layers, self.glus):
             residual = x
-            x, state = layer.forward_with_state(x, state)
+            x = norm(x)
+            x, state = lru.forward_with_state(x, state)
+            x = glu(x)
             x = x + residual
 
         x = self.output_proj(x)

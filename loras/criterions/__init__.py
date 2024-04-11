@@ -3,13 +3,13 @@ import torch
 from .cemse import CEplusMSE
 from .segmentation import MeanOverFramesAccuracy, EditDistance, F1Score
 
-def log_multi_result(result, logger, mode):
+def log_multi_result(result, logger_fn, mode):
     """ Log a multi result from losses or metrics
     """
-    for key, value in result:
-        prefix = f'{key}/{mode}'
-        for metric_name, metric_value in value:
-            logger.log(f'{prefix}/{metric_name}', metric_value, on_epoch=True, on_step=False, prog_bar=False)
+    for category_name, category_data in result.items():
+        prefix = f'{category_name}/{mode}'
+        for metric_name, metric_value in category_data.items():
+            logger_fn(f'{prefix}/{metric_name}', metric_value, on_epoch=True, on_step=False, prog_bar=False)
 
 
 def calculate_multi_loss(logits, targets, categories):
@@ -46,13 +46,12 @@ def calculate_multi_metrics(logits, targets, categories):
 
     for logit, target, category in zip(logits, targets, categories):
         category_name, _ = category
-
-        category_result = calculate_metrics(logit, target, prefix=None)
+        category_result = calculate_metrics(logit, target)
         result[category_name] = category_result
         
     return result
 
-def calculate_metrics(logits, targets, prefix=None):
+def calculate_metrics(logits, targets):
     """ logits:  [batch_size, seq_len, logits]
         targets: [batch_size, seq_len]
     """
@@ -66,8 +65,4 @@ def calculate_metrics(logits, targets, prefix=None):
 
     result = { 'mof': mof(predictions, targets), 'edit': edit(predictions, targets) }
     result.update(f1(predictions, targets))
-
-    if prefix is not None:
-        result = { f'{prefix}/{key}': val for key,val in result.items() }
-    
     return result

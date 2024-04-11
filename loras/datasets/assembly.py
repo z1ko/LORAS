@@ -72,7 +72,7 @@ class Assembly101(lightning.LightningDataModule):
         poses = torch.nn.utils.rnn.pad_sequence(poses, batch_first=True)
         labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
 
-        return embeddings, poses, labels[..., 1] # take only the action for now
+        return embeddings, poses, labels[..., 1:] # take only verb + noun
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
