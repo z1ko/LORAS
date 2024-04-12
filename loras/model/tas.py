@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import lightning
+import einops
 
 from time import perf_counter_ns
 
@@ -19,6 +20,30 @@ def build_categories_head(config):
 
     return categories, heads
 
+class input_module(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.modality = config.modality
+
+        self.input_features = 0 
+        if self.modality == 'embeddings':
+            self.input_features = config.frame_features
+        elif self.modality == 'poses':
+            self.input_features = config.pose_joint_features * config.pose_join_count
+        else:
+            raise NotImplementedError()
+
+        self.model = nn.Sequential(
+            nn.Linear(self.input_features, config.model_dim),
+            nn.LayerNorm(config.model_dim),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+        )
+
+    def forward(self, x):
+        if self.modality == 'poses':
+            x = einops.rearrange(x, 'B T H J F -> B T (H J F)')
+        return self.model(x)
 
 class LORAS(lightning.LightningModule):
     def __init__(self, config):
@@ -27,18 +52,14 @@ class LORAS(lightning.LightningModule):
         # Store hyperparameters
         self.save_hyperparameters(vars(config))
         self.inference = False
+        self.modality = config.modality
         self.config = config
 
         # Create output categories and heads
         self.categories, self.output_heads = build_categories_head(config)
 
         # Initial embeddings reduction
-        self.input_module = nn.Sequential(
-            nn.Linear(config.frame_features, config.model_dim),
-            nn.LayerNorm(config.model_dim),
-            nn.ReLU(),
-            nn.Dropout(config.dropout),
-        )
+        self.input_module = input_module(config)
 
         self.temporal = LRUBlock(
             input_dim=config.model_dim, 
@@ -65,8 +86,15 @@ class LORAS(lightning.LightningModule):
 
         return outputs, state
 
-    def forward(self, frames, _poses):
-        x = self.input_module(frames)
+    def forward(self, frames, poses):
+        
+        if self.modality == 'embeddings':
+            x = self.input_module(frames)
+        elif self.modality == 'poses':
+            x = self.input_module(poses)
+        else:
+            raise NotImplementedError()
+        
         x = self.temporal(x)
 
         # Calculate each category output

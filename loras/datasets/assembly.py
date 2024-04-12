@@ -39,6 +39,7 @@ class Assembly101Dataset(torch.utils.data.Dataset):
 
         labels = torch.tensor(sample['fine-labels']).long()
         embeddings = torch.tensor(sample['embeddings'], dtype=torch.float32)
+        embeddings = einops.rearrange(embeddings, 'T H J F -> T (H J) F')
         poses = torch.tensor(sample['poses'],dtype=torch.float32)
 
         if clip is not None:

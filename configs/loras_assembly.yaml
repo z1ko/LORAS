@@ -26,3 +26,4 @@ lru_max_radius: 0.9
 
 categories: ['verb', 'noun']
 categories_num_classes: [25, 91]
+modality: 'poses'
