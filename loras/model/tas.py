@@ -21,15 +21,15 @@ def build_categories_head(config):
     return categories, heads
 
 class input_module(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, modality):
         super().__init__()
-        self.modality = config.modality
+        self.modality = modality
 
         self.input_features = 0 
         if self.modality == 'embeddings':
             self.input_features = config.frame_features
         elif self.modality == 'poses':
-            self.input_features = config.pose_joint_features * config.pose_join_count
+            self.input_features = config.pose_joint_features * config.pose_joint_count
         else:
             raise NotImplementedError()
 
@@ -42,74 +42,23 @@ class input_module(nn.Module):
 
     def forward(self, x):
         if self.modality == 'poses':
-            x = einops.rearrange(x, 'B T H J F -> B T (H J F)')
+            x = einops.rearrange(x, 'B T J F -> B T (J F)')
         return self.model(x)
 
-class LORAS(lightning.LightningModule):
+class LORASBase(lightning.LightningModule):
+    """ Base class for all LORAS
+    """
+
     def __init__(self, config):
         super().__init__()
-
-        # Store hyperparameters
-        self.save_hyperparameters(vars(config))
-        self.inference = False
         self.modality = config.modality
-        self.config = config
-
-        # Create output categories and heads
-        self.categories, self.output_heads = build_categories_head(config)
-
-        # Initial embeddings reduction
-        self.input_module = input_module(config)
-
-        self.temporal = LRUBlock(
-            input_dim=config.model_dim, 
-            output_dim=config.model_dim, 
-            state_dim=config.temporal_state_dim, 
-            layers_count=config.temporal_layers_count, 
-            dropout=config.dropout,
-            phase_max=config.lru_max_phase,
-            r_min=config.lru_min_radius,
-            r_max=config.lru_max_radius,
-        )
-
-    def initialize_inference(self):
-        self.temporal.initialize_inference()
-        self.inference = True
-
-    def forward_with_state(self, frames, _poses, state):
-        x = self.input_module(frames)
-        x, state = self.temporal.forward_with_state(x, state)
-
-        outputs = []
-        for head in self.output_heads:
-            outputs.append(head(x))
-
-        return outputs, state
-
-    def forward(self, frames, poses):
-        
-        if self.modality == 'embeddings':
-            x = self.input_module(frames)
-        elif self.modality == 'poses':
-            x = self.input_module(poses)
-        else:
-            raise NotImplementedError()
-        
-        x = self.temporal(x)
-
-        # Calculate each category output
-        outputs = []
-        for head in self.output_heads:
-            outputs.append(head(x))
-        
-        return outputs
 
     def split_targets_between_categories(self, targets):
         targets_verb, targets_noun = torch.split(targets, split_size_or_sections=1, dim=-1)
         targets_verb = torch.squeeze(targets_verb, dim=-1)
         targets_noun = torch.squeeze(targets_noun, dim=-1)
         return [ targets_verb, targets_noun ]
-
+    
     def training_step(self, batch, _batch_idx):
         frames, poses, targets = batch
         targets = self.split_targets_between_categories(targets)
@@ -158,33 +107,6 @@ class LORAS(lightning.LightningModule):
         losses, combined_loss = calculate_multi_loss(logits, targets, self.categories)
         return combined_loss
 
-    def benchmark_framerate(self):
-
-        self.initialize_inference()
-        x = torch.zeros(2048)
-        state = torch.complex(
-            torch.tensor(1024, dtype=torch.float32), 
-            torch.tensor(1024, dtype=torch.float32)
-        )
-
-        fps = 0.0
-        elapsed = 0.0
-        for i in range(1000):
-            
-            beg = perf_counter_ns()
-            _, _ = self.forward_with_state(x, None, state)
-            end = perf_counter_ns()
-
-            elapsed_ms = (end - beg) * 1e-6
-            elapsed += elapsed_ms
-            fps += 1.0 / (elapsed_ms * 1e-3)
-
-        elapsed /= 1000.0
-        fps /= 1000.0
-
-        return elapsed, fps
-
-
     def on_before_optimizer_step(self, optimizer):
         pass
 
@@ -193,37 +115,93 @@ class LORAS(lightning.LightningModule):
         optimizer = torch.optim.SGD(params=params, lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=self.config.scheduler_step, gamma=0.1)
         return {'optimizer': optimizer, 'lr_scheduler': scheduler}
+
+class LORAS(LORASBase):
+    def __init__(self, config):
+        super().__init__(config)
+
+        # Store hyperparameters
+        self.save_hyperparameters(vars(config))
+        self.inference = False
+        self.modality = config.modality
+        self.config = config
+
+        # Create output categories and heads
+        self.categories, self.output_heads = build_categories_head(config)
+
+        # Initial embeddings reduction
+        self.input_module = input_module(config, config.modality)
+
+        self.temporal = LRUBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count, 
+            dropout=config.dropout,
+            phase_max=config.lru_max_phase,
+            r_min=config.lru_min_radius,
+            r_max=config.lru_max_radius,
+        )
+
+    def initialize_inference(self):
+        self.temporal.initialize_inference()
+        self.inference = True
+
+    def forward_with_state(self, frames, _poses, state):
+        x = self.input_module(frames)
+        x, state = self.temporal.forward_with_state(x, state)
+
+        outputs = []
+        for head in self.output_heads:
+            outputs.append(head(x))
+
+        return outputs, state
+
+    def forward(self, frames, poses):
+        
+        if self.modality == 'embeddings':
+            x = self.input_module(frames)
+        elif self.modality == 'poses':
+            x = self.input_module(poses)
+        else:
+            raise NotImplementedError()
+        
+        x = self.temporal(x)
+
+        # Calculate each category output
+        outputs = []
+        for head in self.output_heads:
+            outputs.append(head(x))
+        
+        return outputs
     
 
-class LORASFused(lightning.LightningModule):
+class LORASFused(LORASBase):
     def __init__(self, config):
-        super().__init__()
+        super().__init__(config)
         self.config = config
 
         # Output module
         self.categories, self.output_heads = build_categories_head(config)
 
-        # Initial pose data reduction
-        self.pose_input_dim = config.pose_joint_features * config.pose_join_count
-        self.pose_input_module = nn.Sequential(
-            nn.Linear(self.pose_input_dim, config.model_dim),
-            nn.LayerNorm(config.model_dim),
-            nn.ReLU(),
-            nn.Dropout(config.dropout),
-        )
+        self.input_embeddings = input_module(config, 'embeddings')
+        self.input_poses = input_module(config, 'poses')
 
-        # Initial frames data reduction
-        self.frame_input_module = nn.Sequential(
-            nn.Linear(config.frame_features, config.model_dim),
-            nn.LayerNorm(config.model_dim),
-            nn.ReLU(),
-            nn.Dropout(config.dropout),
+        self.temporal = LRUBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count, 
+            dropout=config.dropout,
+            phase_max=config.lru_max_phase,
+            r_min=config.lru_min_radius,
+            r_max=config.lru_max_radius,
         )
 
         # Final merger between poses and frames
         self.final_mixer = nn.Sequential(
+            nn.LayerNorm(config.model_dim * 2),
             nn.Linear(config.model_dim * 2, config.model_dim),
-            nn.LayerNorm(config.model_dim),
             nn.ReLU(),
             nn.Dropout(config.dropout)
         )
@@ -231,9 +209,9 @@ class LORASFused(lightning.LightningModule):
     def forward(self, frames, poses):
 
         # TODO: temporal frequency reduction
-        f = self.frame_input_module(frames)
+        f = self.input_embeddings(frames)
 
-        p = self.pose_input_module(poses)
+        p = self.input_poses(poses)
         p = self.temporal(p)
         
         x = torch.cat([p, f], dim=-1)
@@ -241,7 +219,7 @@ class LORASFused(lightning.LightningModule):
 
         # Calculate each category output
         outputs = []
-        for i, head in enumerate(self.output_heads):
-            outputs[i] = head(x)
+        for head in self.output_heads:
+            outputs.append(head(x))
         
         return outputs

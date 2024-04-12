@@ -1,1 +1,1 @@
-from .tas import LORAS
+from .tas import LORAS, LORASFused

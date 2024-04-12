@@ -39,8 +39,8 @@ class Assembly101Dataset(torch.utils.data.Dataset):
 
         labels = torch.tensor(sample['fine-labels']).long()
         embeddings = torch.tensor(sample['embeddings'], dtype=torch.float32)
-        embeddings = einops.rearrange(embeddings, 'T H J F -> T (H J) F')
         poses = torch.tensor(sample['poses'],dtype=torch.float32)
+        poses = einops.rearrange(poses, 'T H J F -> T (H J) F')
 
         if clip is not None:
             beg, end = clip
@@ -123,6 +123,48 @@ def gather_split_annotations(annotations, all_frames_dict, jsons_list_poses):
 
     print("Inside gather_split_annotations(): ", counters)
 
+def extract_frames(dbs, video_id, frames_count, embeddings):
+    # example: 'nusar-2021_action_both_9044-a08_9044_user_id_2021-02-19_083738/C10095_rgb/C10095_rgb_0000011685.jpg'
+
+    # Find correct database
+    selected_db = None
+    for view, db in dbs:
+        with db.begin(write=False) as e:
+            key = os.path.join(video_id, f'{view}/{view}_{1:010d}.jpg')
+            if e.get(key.strip().encode('utf-8')) is not None:
+                selected_db = db
+                break
+
+    # No database data found for this video_id
+    if selected_db is None:
+        return None, None
+
+    complete = True
+    database_frames_count = 0
+    with selected_db.begin(write=False) as e:
+        for i in range(0, frames_count):
+            key = os.path.join(video_id, f'{args.view}/{args.view}_{(i+1):010d}.jpg')
+            frame_data = e.get(key.strip().encode('utf-8'))
+            if frame_data is None:
+                print(f"[!] No data found for frame {i}.")
+                complete = False
+                break
+
+            embeddings[i, :] = numpy.frombuffer(frame_data, 'float32')
+            database_frames_count += 1
+
+    # Cap to shortest sequence if possible
+    result_range = (0, frames_count)
+    if not complete:
+        # If only the ending frames are missing, continue
+        if frames_count - database_frames_count < 100:
+            result_range = (0, database_frames_count)
+        else:
+            print(f'[!] too many missing frames for {video_id}, skipping sample')
+            return None, None
+
+    return embeddings, result_range
+
 def preprocess(args):
     columns = [
         "id", "video", "start_frame", "end_frame", "action_id", "verb_id", "noun_id",
@@ -132,9 +174,17 @@ def preprocess(args):
     jsons_list_poses = os.listdir(args.path_to_poses)
     jsons_list_poses.sort()
 
-    # Load database for views
-    tsm_path = os.path.join(args.path_to_tsm, args.view)
-    tsm = lmdb.open(tsm_path, readonly=True, lock=False)
+    # NOTE: e2 view requires two possible databases
+    if args.egocentric:
+        dbs = [
+            ('HMC_84355350_mono10bit', lmdb.open(os.path.join(args.path_to_tsm, 'HMC_84355350_mono10bit'))),
+            ('HMC_21110305_mono10bit', lmdb.open(os.path.join(args.path_to_tsm, 'HMC_21110305_mono10bit'))),
+        ]
+    else:
+        # Load database for views
+        tsm_path = os.path.join(args.path_to_tsm, args.view)
+        tsm = lmdb.open(tsm_path, readonly=True, lock=False)
+
 
     splits = ['train', 'validation']
     for split in splits:
@@ -252,6 +302,8 @@ if __name__ == '__main__':
     
     # What view to consider
     parser.add_argument('--view', type=str, default='C10095_rgb')
+    parser.add_argument('--egocentric', action='store_true')
+
     # Keep zero-shot elements
     parser.add_argument('--keep_zero_shot', action='store_true')
 
