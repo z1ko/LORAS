@@ -1,6 +1,4 @@
 import torch
-import wandb
-import os
 
 from lightning.pytorch import Trainer
 from lightning.pytorch.loggers import WandbLogger
@@ -8,7 +6,7 @@ from lightning.pytorch.callbacks import EarlyStopping
 
 from loras.model import LORAS, LORASFused
 from loras.datasets import Assembly101
-from loras.utils import load_args_and_config
+from loras.utils import load_args_and_config, output_model_predictions
 
 def run_model():
     return 0.0
@@ -38,37 +36,18 @@ trainer = Trainer(
 #elapsed, fps = model.benchmark_framerate()
 #print(f'elapsed ms for frame: {elapsed}, fps: {fps}')
 
+#torch.cuda.memory._record_memory_history()
+
 trainer.fit(
-    model, 
-    train_dataloaders=dataset.train_dataloader(), 
+    model,
+    train_dataloaders=dataset.train_dataloader(),
     val_dataloaders=dataset.val_dataloader()
 )
+
+#torch.cuda.memory._dump_snapshot("run_memory_usage.pickle")
 
 # Final evaluation to use with facebook ax
 #predictions = trainer.predict(model, dataloaders=dataset.val_dataloader())
 
-experiment_name = wandb.run.name
-output_path = os.path.join('./runs/predictions', experiment_name)
-os.makedirs(output_path)
-
-with open(output_path + '/predictions.txt', 'wt') as f:
-
-    # Header
-    for category, num_classes in zip(config.categories, config.categories_num_classes):
-        f.write(f'{category}:{num_classes}\n')
-
-    f.write('================================')
-
-    for frames, poses, targets in dataset.val_dataloader():
-        assert(targets.shape[0] == 1)
-        frames_count = targets.shape[1]
-
-        f.write(f'{frames_count}\n')
-        for i, label in enumerate(targets[0]):
-            end = ',' if i != len(frames_count) else ''
-            f.write(f'{label.item()}{end}')
-
-        loss, outputs = model.predict_step((frames, poses, targets)) 
-        for i, output in enumerate(outputs[0]):
-            end = ',' if i != len(frames_count) else ''
-            f.write(f'{output.item()}{end}')
+predictions_path = './predictions/' + logger.experiment.id
+output_model_predictions(predictions_path, model, dataset.val_dataloader(), config)
