@@ -102,10 +102,13 @@ class LORASBase(lightning.LightningModule):
         frames, poses, targets = batch
 
         logits = self.forward(frames, poses)
-        
+        probabilities = torch.softmax(logits, dim=-1)
+        results = torch.argmax(probabilities, dim=-1)
+
         targets = self.split_targets_between_categories(targets)
         losses, combined_loss = calculate_multi_loss(logits, targets, self.categories)
-        return combined_loss
+
+        return combined_loss, results
 
     def on_before_optimizer_step(self, optimizer):
         pass

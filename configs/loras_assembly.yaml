@@ -14,10 +14,10 @@ train_epochs: 200
 frame_features: 2048
 pose_joint_features: 3
 pose_joint_count: 42
-model_dim: 256
+model_dim: 1024
 dropout: 0.20
-temporal_layers_count: 6
-temporal_state_dim: 512
+temporal_layers_count: 2
+temporal_state_dim: 1024
 
 # LRU initialization
 lru_max_phase:  0.314159265 # pi / 10
@@ -26,4 +26,4 @@ lru_max_radius: 0.9
 
 categories: ['verb', 'noun']
 categories_num_classes: [25, 91]
-modality: 'poses'
+modality: 'fused'
