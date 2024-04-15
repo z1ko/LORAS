@@ -1,23 +1,24 @@
-accumulate_grad_batches: 4
+accumulate_grad_batches: 6
 num_workers: 1
 
 views: ['C10095_rgb']
 clip_size: None
 target_label: 'action'
-learning_rate: 0.01
+learning_rate: 0.04
 weight_decay: 0.0005
-scheduler_step: 100
+scheduler_step: 61
 batch_size: 1
 test_batch_size: 1
-cemse_alpha: 0.17
+cemse_alpha: 0.22
 train_epochs: 200
 frame_features: 2048
 pose_joint_features: 3
 pose_joint_count: 42
-model_dim: 1024
-dropout: 0.20
-temporal_layers_count: 2
-temporal_state_dim: 1024
+model_dim: 256
+dropout: 0.60
+temporal_layers_count: 4
+temporal_state_dim: 64
+temporal_model: 's4d' # alternatives: lru, s4d
 
 # LRU initialization
 lru_max_phase:  0.314159265 # pi / 10
@@ -26,4 +27,4 @@ lru_max_radius: 0.9
 
 categories: ['verb', 'noun']
 categories_num_classes: [25, 91]
-modality: 'fused'
+modality: 'embeddings'

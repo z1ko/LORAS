@@ -5,8 +5,8 @@ import einops
 
 from time import perf_counter_ns
 
-from loras.model.temporal import LRUBlock
-from loras.criterions import CEplusMSE, calculate_multi_metrics, calculate_multi_loss, log_multi_result
+from loras.model.temporal import LRUBlock, S4DBlock
+from loras.criterions import calculate_multi_metrics, calculate_multi_loss, log_multi_result
 
 def build_categories_head(config):
     
@@ -19,6 +19,29 @@ def build_categories_head(config):
         heads.append(nn.Linear(config.model_dim, num_classes))
 
     return categories, heads
+
+def build_temporal_model(config):
+    if config.temporal_model == 'lru':
+        return LRUBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count, 
+            dropout=config.dropout,
+            phase_max=config.lru_max_phase,
+            r_min=config.lru_min_radius,
+            r_max=config.lru_max_radius,
+        )
+    elif config.temporal_model == 's4d':
+        return S4DBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count, 
+            dropout=config.dropout
+        )
+    else:
+        raise NotADirectoryError()
 
 class input_module(nn.Module):
     def __init__(self, config, modality):
@@ -102,8 +125,11 @@ class LORASBase(lightning.LightningModule):
         frames, poses, targets = batch
 
         logits = self.forward(frames, poses)
-        probabilities = torch.softmax(logits, dim=-1)
-        results = torch.argmax(probabilities, dim=-1)
+        
+        results = []
+        for i in range(len(logits)):
+            probabilities = torch.softmax(logits[i], dim=-1)
+            results.append(torch.argmax(probabilities, dim=-1))
 
         targets = self.split_targets_between_categories(targets)
         losses, combined_loss = calculate_multi_loss(logits, targets, self.categories)
@@ -131,20 +157,8 @@ class LORAS(LORASBase):
 
         # Create output categories and heads
         self.categories, self.output_heads = build_categories_head(config)
-
-        # Initial embeddings reduction
         self.input_module = input_module(config, config.modality)
-
-        self.temporal = LRUBlock(
-            input_dim=config.model_dim, 
-            output_dim=config.model_dim, 
-            state_dim=config.temporal_state_dim, 
-            layers_count=config.temporal_layers_count, 
-            dropout=config.dropout,
-            phase_max=config.lru_max_phase,
-            r_min=config.lru_min_radius,
-            r_max=config.lru_max_radius,
-        )
+        self.temporal = build_temporal_model(config)
 
     def initialize_inference(self):
         self.temporal.initialize_inference()
