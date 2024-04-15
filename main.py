@@ -1,4 +1,6 @@
 import torch
+import wandb
+import os
 
 from lightning.pytorch import Trainer
 from lightning.pytorch.loggers import WandbLogger
@@ -22,13 +24,13 @@ else:
     model = LORAS(config)
 
 # Stop training if the validation loss doesn't decrease
-early_stopping = EarlyStopping(monitor='val/loss', patience=25, mode='min')
+#early_stopping = EarlyStopping(monitor='val/loss', patience=25, mode='min')
 
 logger = WandbLogger(name='LORAS', save_dir='runs')
 trainer = Trainer(
     accumulate_grad_batches=config.accumulate_grad_batches,
     max_epochs=config.train_epochs,
-    callbacks=[early_stopping], 
+#    callbacks=[early_stopping], 
     logger=logger
 )
 
@@ -43,6 +45,30 @@ trainer.fit(
 )
 
 # Final evaluation to use with facebook ax
-predictions = trainer.predict(model, dataloaders=dataset.val_dataloader())
-final_score = sum(predictions) / len(predictions)
-print(f'model score: {final_score}')
+#predictions = trainer.predict(model, dataloaders=dataset.val_dataloader())
+
+experiment_name = wandb.run.name
+output_path = os.path.join('./runs/predictions', experiment_name)
+os.makedirs(output_path)
+
+with open(output_path + '/predictions.txt', 'wt') as f:
+
+    # Header
+    for category, num_classes in zip(config.categories, config.categories_num_classes):
+        f.write(f'{category}:{num_classes}\n')
+
+    f.write('================================')
+
+    for frames, poses, targets in dataset.val_dataloader():
+        assert(targets.shape[0] == 1)
+        frames_count = targets.shape[1]
+
+        f.write(f'{frames_count}\n')
+        for i, label in enumerate(targets[0]):
+            end = ',' if i != len(frames_count) else ''
+            f.write(f'{label.item()}{end}')
+
+        loss, outputs = model.predict_step((frames, poses, targets)) 
+        for i, output in enumerate(outputs[0]):
+            end = ',' if i != len(frames_count) else ''
+            f.write(f'{output.item()}{end}')
