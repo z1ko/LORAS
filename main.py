@@ -49,5 +49,5 @@ trainer.fit(
 # Final evaluation to use with facebook ax
 #predictions = trainer.predict(model, dataloaders=dataset.val_dataloader())
 
-predictions_path = './predictions/' + logger.experiment.id
-output_model_predictions(predictions_path, model, dataset.val_dataloader(), config)
+#predictions_path = './predictions/' + logger.experiment.id
+#output_model_predictions(predictions_path, model, dataset.val_dataloader(), config)

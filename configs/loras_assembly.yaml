@@ -14,11 +14,15 @@ train_epochs: 200
 frame_features: 2048
 pose_joint_features: 3
 pose_joint_count: 42
-model_dim: 256
-dropout: 0.60
-temporal_layers_count: 4
-temporal_state_dim: 64
-temporal_model: 's4d' # alternatives: lru, s4d
+model_dim: 512
+dropout: 0.20
+temporal_layers_count: 6
+temporal_state_dim: 256
+temporal_model: 'mamba' # alternatives: lru, s4d, mamba
+
+# Mamba initialization
+mamba_expand_factor: 2
+mamba_conv_size: 4
 
 # LRU initialization
 lru_max_phase:  0.314159265 # pi / 10
@@ -27,4 +31,5 @@ lru_max_radius: 0.9
 
 categories: ['verb', 'noun']
 categories_num_classes: [25, 91]
+background_class_weight: 0.1 # refers always to class 0
 modality: 'embeddings'

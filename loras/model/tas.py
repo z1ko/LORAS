@@ -5,7 +5,7 @@ import einops
 
 from time import perf_counter_ns
 
-from loras.model.temporal import LRUBlock, S4DBlock
+from loras.model.temporal import LRUBlock, S4DBlock, MambaBlock
 from loras.criterions import calculate_multi_metrics, calculate_multi_loss, log_multi_result
 
 def build_categories_head(config):
@@ -39,6 +39,15 @@ def build_temporal_model(config):
             state_dim=config.temporal_state_dim, 
             layers_count=config.temporal_layers_count, 
             dropout=config.dropout
+        )
+    elif config.temporal_model == 'mamba':
+        return MambaBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count,
+            expand=config.mamba_expand_factor,
+            conv_size=config.mamba_conv_size
         )
     else:
         raise NotADirectoryError()
@@ -75,6 +84,8 @@ class LORASBase(lightning.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.modality = config.modality
+        self.bg_weight = config.background_class_weight
+        self.alpha = config.cemse_alpha
 
     def split_targets_between_categories(self, targets):
         targets_verb, targets_noun = torch.split(targets, split_size_or_sections=1, dim=-1)
@@ -88,7 +99,7 @@ class LORASBase(lightning.LightningModule):
 
         # Output logits for each target category
         logits = self.forward(frames, poses)
-        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories)
+        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.bg_weight)
         log_multi_result(losses, self.log, 'train')
 
         self.log('train/loss', combined_loss, on_epoch=True, on_step=False, prog_bar=True)
@@ -114,7 +125,7 @@ class LORASBase(lightning.LightningModule):
         metrics = calculate_multi_metrics(logits, targets, self.categories)
         log_multi_result(metrics, self.log, 'val')
 
-        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories)
+        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.bg_weight)
         log_multi_result(losses, self.log, 'val')
 
         self.log('val/loss', combined_loss, on_epoch=True, on_step=False, prog_bar=True)
@@ -132,7 +143,7 @@ class LORASBase(lightning.LightningModule):
             results.append(torch.argmax(probabilities, dim=-1))
 
         targets = self.split_targets_between_categories(targets)
-        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories)
+        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.bg_weight)
 
         return combined_loss, results
 
