@@ -19,6 +19,12 @@ import torch.utils.data
 
 class Assembly101Dataset(torch.utils.data.Dataset):
     def __init__(self, mode, config):
+
+        # load classes weights
+        with open(config.categories_class_weight, 'rb') as f:
+            self.weights = [torch.tensor(x, dtype=torch.float32).cuda() 
+                            for x in pickle.load(f)]
+
         self.items = []
         split_path = os.path.join('data/Assembly101/processed', mode)
         for item in tqdm(os.listdir(split_path)):
@@ -74,6 +80,10 @@ class Assembly101(lightning.LightningDataModule):
         labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
 
         return embeddings, poses, labels[..., 1:] # take only verb + noun
+
+    @property
+    def weights(self):
+        return self.training.weights
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(

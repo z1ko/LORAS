@@ -7,21 +7,21 @@ clip_size: None
 
 learning_rate: 0.01
 learning_rate_scheduler: 'step' # alternatives: step, onecycle, cosine_annealing
-scheduler_step: 150
+scheduler_step: 100
 scheduler_gamma: 0.5
 
 optimizer: 'SGD' # alternatives: SGD
 
-weight_decay: 0.005
+weight_decay: 0.0005
 batch_size: 1
 test_batch_size: 1
-cemse_alpha: 0.50
+cemse_alpha: 0.22
 train_epochs: 400
 frame_features: 2048
 pose_joint_features: 3
 pose_joint_count: 42
 model_dim: 256
-dropout: 0.20
+dropout: 0.22
 temporal_layers_count: 6
 temporal_state_dim: 768
 temporal_model: 'lru' # alternatives: lru, s4d, mamba
@@ -31,8 +31,8 @@ temporal_model: 'lru' # alternatives: lru, s4d, mamba
 #mamba_conv_size: 4
 
 # LRU initialization
-lru_max_phase: 0.15707963267  # pi / 20
-lru_min_radius: 0.60
+lru_max_phase:  0.314159265 # pi / 10
+lru_min_radius: 0.50
 lru_max_radius: 0.99
 
 categories: ['verb', 'noun']

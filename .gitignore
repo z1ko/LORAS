@@ -2,3 +2,4 @@ __pycache__/
 venv/
 runs/
 data/
+lightning_logs/

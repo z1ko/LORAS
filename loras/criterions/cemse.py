@@ -11,12 +11,10 @@ class CEplusMSE(nn.Module):
     https://arxiv.org/abs/1903.01945
     """
 
-    def __init__(self, num_classes, bg_weight=0.1, alpha=0.17):
+    def __init__(self, num_classes, weight, alpha=0.17):
         super().__init__()
 
-        # Create a weight mapping TODO
-        self.weight = torch.tensor([bg_weight] + [1.0 for _ in range(num_classes - 1)]).to('cuda')
-        self.ce = nn.CrossEntropyLoss(ignore_index=-100, weight=self.weight)
+        self.ce = nn.CrossEntropyLoss(ignore_index=-100, weight=weight)
         self.mse = nn.MSELoss(reduction='none')
         self.classes = num_classes
         self.alpha = alpha

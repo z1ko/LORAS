@@ -17,9 +17,9 @@ print(config)
 dataset = Assembly101(config)
 
 if config.modality == 'fused':
-    model = LORASFused(config)
+    model = LORASFused(config, dataset.weights)
 else:
-    model = LORAS(config)
+    model = LORAS(config, dataset.weights)
 
 # Stop training if the validation loss doesn't decrease
 #early_stopping = EarlyStopping(monitor='val/loss', patience=25, mode='min')
@@ -28,6 +28,7 @@ logger = WandbLogger(name='LORAS', save_dir='runs')
 trainer = Trainer(
     accumulate_grad_batches=config.accumulate_grad_batches,
     max_epochs=config.train_epochs,
+    gradient_clip_val=300.0,
 #    callbacks=[early_stopping], 
     logger=logger
 )

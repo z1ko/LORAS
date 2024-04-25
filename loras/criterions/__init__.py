@@ -12,7 +12,7 @@ def log_multi_result(result, logger_fn, mode):
             logger_fn(f'{prefix}/{metric_name}', metric_value, on_epoch=True, on_step=False, prog_bar=False)
 
 
-def calculate_multi_loss(logits, targets, categories, alpha, bg_weight):
+def calculate_multi_loss(logits, targets, categories, alpha, weights):
     """ Calculate ce+mse multiloss between different target categories
             logits:     an array of tensors, each of the shape [batch_size, seq_len, logits]
             targets:    an array of tensors, each of the shape [batch_size, seq_len]
@@ -24,10 +24,10 @@ def calculate_multi_loss(logits, targets, categories, alpha, bg_weight):
         result[category_name] = {}
 
     combined = 0.0
-    for logit, target, category in zip(logits, targets, categories):
+    for i, (logit, target, category) in enumerate(zip(logits, targets, categories)):
+        assert(target.shape[0] == 1)
         category_name, num_classes = category
-
-        loss = CEplusMSE(num_classes, alpha=alpha, bg_weight=bg_weight)
+        loss = CEplusMSE(num_classes, alpha=alpha, weight=weights[i])
         category_result = loss(logit, target)
         result[category_name] = category_result
         

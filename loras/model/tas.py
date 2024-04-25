@@ -21,36 +21,72 @@ def build_categories_head(config):
     return categories, heads
 
 def build_temporal_model(config):
-    if config.temporal_model == 'lru':
-        return LRUBlock(
-            input_dim=config.model_dim, 
-            output_dim=config.model_dim, 
-            state_dim=config.temporal_state_dim, 
-            layers_count=config.temporal_layers_count, 
-            dropout=config.dropout,
-            phase_max=config.lru_max_phase,
-            r_min=config.lru_min_radius,
-            r_max=config.lru_max_radius,
-        )
-    elif config.temporal_model == 's4d':
-        return S4DBlock(
-            input_dim=config.model_dim, 
-            output_dim=config.model_dim, 
-            state_dim=config.temporal_state_dim, 
-            layers_count=config.temporal_layers_count, 
-            dropout=config.dropout
-        )
-    elif config.temporal_model == 'mamba':
-        return MambaBlock(
-            input_dim=config.model_dim, 
-            output_dim=config.model_dim, 
-            state_dim=config.temporal_state_dim, 
-            layers_count=config.temporal_layers_count,
-            expand=config.mamba_expand_factor,
-            conv_size=config.mamba_conv_size
-        )
-    else:
-        raise NotADirectoryError()
+    match config.temporal_model:
+        case 'lru':
+            return LRUBlock(
+                input_dim=config.model_dim, 
+                output_dim=config.model_dim, 
+                state_dim=config.temporal_state_dim, 
+                layers_count=config.temporal_layers_count, 
+                dropout=config.dropout,
+                phase_max=config.lru_max_phase,
+                r_min=config.lru_min_radius,
+                r_max=config.lru_max_radius,
+            )
+        case 's4d':
+            return S4DBlock(
+                input_dim=config.model_dim, 
+                output_dim=config.model_dim, 
+                state_dim=config.temporal_state_dim, 
+                layers_count=config.temporal_layers_count, 
+                dropout=config.dropout
+            )
+        case 'mamba':
+            return MambaBlock(
+                input_dim=config.model_dim, 
+                output_dim=config.model_dim, 
+                state_dim=config.temporal_state_dim, 
+                layers_count=config.temporal_layers_count,
+                expand=config.mamba_expand_factor,
+                conv_size=config.mamba_conv_size
+            )
+        
+    raise NotImplementedError()
+
+def build_optimizer(params, config):
+    match config.optimizer:
+        case 'SGD':
+            return torch.optim.SGD(
+                params=params, 
+                lr=config.learning_rate, 
+                weight_decay=config.weight_decay
+            )
+
+    raise NotImplementedError()
+
+# step, onecycle, cosine_annealing
+def build_lr_scheduler(optimizer, config):
+    match config.learning_rate_scheduler:
+        case 'step': 
+            return torch.optim.lr_scheduler.StepLR(
+                optimizer=optimizer, 
+                step_size=config.scheduler_step, 
+                gamma=config.scheduler_gamma
+            )
+        case 'onecycle':
+            return torch.optim.lr_scheduler.OneCycleLR(
+                optimizer=optimizer, 
+                step_size=config.scheduler_step, 
+                gamma=config.scheduler_gamma
+            )
+        case 'cosine_annealing':
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer=optimizer,
+                step_size=config.scheduler_step, 
+                gamma=config.scheduler_gamma
+            )
+
+    raise NotImplementedError()
 
 class input_module(nn.Module):
     def __init__(self, config, modality):
@@ -66,6 +102,7 @@ class input_module(nn.Module):
             raise NotImplementedError()
 
         self.model = nn.Sequential(
+            nn.Dropout(config.dropout),
             nn.Linear(self.input_features, config.model_dim),
             nn.LayerNorm(config.model_dim),
             nn.ReLU(),
@@ -81,11 +118,11 @@ class LORASBase(lightning.LightningModule):
     """ Base class for all LORAS
     """
 
-    def __init__(self, config):
+    def __init__(self, config, weights):
         super().__init__()
         self.modality = config.modality
-        self.bg_weight = config.background_class_weight
         self.alpha = config.cemse_alpha
+        self.weights = weights
 
     def split_targets_between_categories(self, targets):
         targets_verb, targets_noun = torch.split(targets, split_size_or_sections=1, dim=-1)
@@ -96,10 +133,12 @@ class LORASBase(lightning.LightningModule):
     def training_step(self, batch, _batch_idx):
         frames, poses, targets = batch
         targets = self.split_targets_between_categories(targets)
-
-        # Output logits for each target category
         logits = self.forward(frames, poses)
-        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.bg_weight)
+
+        #metrics = calculate_multi_metrics(logits, targets, self.categories)
+        #log_multi_result(metrics, self.log, 'train')
+
+        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.weights)
         log_multi_result(losses, self.log, 'train')
 
         self.log('train/loss', combined_loss, on_epoch=True, on_step=False, prog_bar=True)
@@ -112,20 +151,20 @@ class LORASBase(lightning.LightningModule):
 
         targets = self.split_targets_between_categories(targets)
 
-        beg = perf_counter_ns()
+        #beg = perf_counter_ns()
         logits = self.forward(frames, poses)
-        end = perf_counter_ns()
+        #end = perf_counter_ns()
 
         # Framerate approximation
         # NOTE: works only because test_batch_size is 1
-        elapsed_ms = (end - beg) * 1e-6
-        self.log('val/elapsed(ms)', elapsed_ms / frames_count, on_step=False, on_epoch=True)
-        self.log('val/fps', frames_count / (elapsed_ms * 1e-3), on_step=False, on_epoch=True)
+        #elapsed_ms = (end - beg) * 1e-6
+        #self.log('val/elapsed(ms)', elapsed_ms / frames_count, on_step=False, on_epoch=True)
+        #self.log('val/fps', frames_count / (elapsed_ms * 1e-3), on_step=False, on_epoch=True)
 
         metrics = calculate_multi_metrics(logits, targets, self.categories)
         log_multi_result(metrics, self.log, 'val')
 
-        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.bg_weight)
+        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.weights)
         log_multi_result(losses, self.log, 'val')
 
         self.log('val/loss', combined_loss, on_epoch=True, on_step=False, prog_bar=True)
@@ -143,7 +182,7 @@ class LORASBase(lightning.LightningModule):
             results.append(torch.argmax(probabilities, dim=-1))
 
         targets = self.split_targets_between_categories(targets)
-        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.bg_weight)
+        losses, combined_loss = calculate_multi_loss(logits, targets, self.categories, self.alpha, self.weights)
 
         return combined_loss, results
 
@@ -152,13 +191,13 @@ class LORASBase(lightning.LightningModule):
 
     def configure_optimizers(self):
         params = list(self.parameters())
-        optimizer = torch.optim.SGD(params=params, lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=self.config.scheduler_step, gamma=0.1)
+        optimizer = build_optimizer(params, self.config)
+        scheduler = build_lr_scheduler(optimizer, self.config)
         return {'optimizer': optimizer, 'lr_scheduler': scheduler}
 
 class LORAS(LORASBase):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, weights):
+        super().__init__(config, weights)
 
         # Store hyperparameters
         self.save_hyperparameters(vars(config))
@@ -205,8 +244,8 @@ class LORAS(LORASBase):
     
 
 class LORASFused(LORASBase):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, weights):
+        super().__init__(config, weights)
         self.config = config
 
         # Output module
