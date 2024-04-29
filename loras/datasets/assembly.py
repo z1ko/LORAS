@@ -31,7 +31,7 @@ class Assembly101Dataset(torch.utils.data.Dataset):
             item_path = os.path.join(split_path, item)
             
             # No clips
-            if config.clip_size == 'None':
+            if config.clip_size == 'None' or mode == 'validation':
                 self.items.append((item_path, None))
             else:
                 frames = int(item.split('-')[0])

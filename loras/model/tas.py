@@ -214,6 +214,12 @@ class LORAS(LORASBase):
         self.temporal.initialize_inference()
         self.inference = True
 
+    def create_state(self):
+        return torch.zeros(
+            (self.config.temporal_layers_count, self.config.temporal_state_dim), 
+            dtype=torch.complex64
+        )
+
     def forward_with_state(self, frames, _poses, state):
         x = self.input_module(frames)
         x, state = self.temporal.forward_with_state(x, state)

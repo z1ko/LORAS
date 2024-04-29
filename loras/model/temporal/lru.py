@@ -50,7 +50,7 @@ class LRU(nn.Module):
         self.C = nn.Parameter(torch.complex(C_re, C_im))
 
     def forward(self, x):  # (B, L, F)
-        self.state = self.state.to(self.B.device)
+        #self.state = self.state.to(self.B.device)
 
         # Istantiate diagonal state matrix
         L_mod = torch.exp(-torch.exp(self.nu_log))
@@ -70,6 +70,22 @@ class LRU(nn.Module):
 
         inner_states = torch.vmap(inner_state_fn)(B_elems)
         return (inner_states @ self.C.T).real
+
+    def forward_no_check(self, x):
+        
+        diag_lambda = torch.exp(-torch.exp(self.nu_log) + 1j * torch.exp(self.theta_log))
+        G_norm = torch.exp(self.gamma_log).unsqueeze(-1)
+        B_norm = self.B * G_norm
+
+        lambda_elements = diag_lambda.tile(x.shape[1], 1)
+        in_elements = B_norm @ x
+
+        # How to update each batch state
+        def state_fn(elements):
+            return associative_scan(binary_operator_diag, (lambda_elements, elements))[1]
+
+        states = torch.vmap(state_fn)(in_elements)
+        return (self.C @ states).real
 
     def initialize_inference(self):
         self.inference = True
@@ -147,10 +163,10 @@ class LRUBlock(nn.Module):
 
         x = self.input_proj(x)
         
-        for norm, lru, glu in zip(self.norms, self.layers, self.glus):
+        for i, (norm, lru, glu) in enumerate(zip(self.norms, self.layers, self.glus)):
             residual = x
             x = norm(x)
-            x, state = lru.forward_with_state(x, state)
+            x, state[i] = lru.forward_with_state(x, state[i])
             x = glu(x)
             x = x + residual
 
