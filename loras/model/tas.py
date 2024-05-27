@@ -220,8 +220,13 @@ class LORAS(LORASBase):
             dtype=torch.complex64
         )
 
-    def forward_with_state(self, frames, _poses, state):
-        x = self.input_module(frames)
+    def forward_with_state(self, x, state):
+        # x shape: [J, F] or [E]
+
+        x = x[None, None, ...]
+        x = self.input_module(x)
+        x = x[0, 0, ...]
+
         x, state = self.temporal.forward_with_state(x, state)
 
         outputs = []
