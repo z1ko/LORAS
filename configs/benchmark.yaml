@@ -1,0 +1,41 @@
+accumulate_grad_batches: 1
+num_workers: 12
+
+#views: ['C10095_rgb']
+#target_label: 'action'
+clip_size: 1800
+
+learning_rate: 0.01
+learning_rate_scheduler: 'step' # alternatives: step, onecycle, cosine_annealing
+scheduler_step: 150
+scheduler_gamma: 0.5
+
+optimizer: 'SGD' # alternatives: SGD
+
+weight_decay: 0.005
+batch_size: 10
+test_batch_size: 1
+cemse_alpha: 0.50
+train_epochs: 400
+frame_features: 2048
+pose_joint_features: 3
+pose_joint_count: 42
+model_dim: 512
+dropout: 0.20
+temporal_layers_count: 2
+temporal_state_dim: 512
+temporal_model: 'lru' # alternatives: lru, s4d, mamba
+
+# Mamba initialization
+#mamba_expand_factor: 2
+#mamba_conv_size: 4
+
+# LRU initialization
+lru_max_phase: 0.15707963267  # pi / 20
+lru_min_radius: 0.60
+lru_max_radius: 0.99
+
+categories: ['verb', 'noun']
+categories_num_classes: [25, 91]
+categories_class_weight: './data/Assembly101/fine-labels-weights.pkl'
+modality: 'poses'
