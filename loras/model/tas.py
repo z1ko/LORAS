@@ -21,70 +21,67 @@ def build_categories_head(config):
     return categories, heads
 
 def build_temporal_model(config):
-    match config.temporal_model:
-        case 'lru':
-            return LRUBlock(
-                input_dim=config.model_dim, 
-                output_dim=config.model_dim, 
-                state_dim=config.temporal_state_dim, 
-                layers_count=config.temporal_layers_count, 
-                dropout=config.dropout,
-                phase_max=config.lru_max_phase,
-                r_min=config.lru_min_radius,
-                r_max=config.lru_max_radius,
-            )
-        case 's4d':
-            return S4DBlock(
-                input_dim=config.model_dim, 
-                output_dim=config.model_dim, 
-                state_dim=config.temporal_state_dim, 
-                layers_count=config.temporal_layers_count, 
-                dropout=config.dropout
-            )
-        case 'mamba':
-            return MambaBlock(
-                input_dim=config.model_dim, 
-                output_dim=config.model_dim, 
-                state_dim=config.temporal_state_dim, 
-                layers_count=config.temporal_layers_count,
-                expand=config.mamba_expand_factor,
-                conv_size=config.mamba_conv_size
-            )
+    if config.temporal_model == 'lru':
+        return LRUBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count, 
+            dropout=config.dropout,
+            phase_max=config.lru_max_phase,
+            r_min=config.lru_min_radius,
+            r_max=config.lru_max_radius,
+        )
+    elif config.temporal_model == 's4d':
+        return S4DBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count, 
+            dropout=config.dropout
+        )
+    elif config.temporal_model == 'mamba':
+        return MambaBlock(
+            input_dim=config.model_dim, 
+            output_dim=config.model_dim, 
+            state_dim=config.temporal_state_dim, 
+            layers_count=config.temporal_layers_count,
+            expand=config.mamba_expand_factor,
+            conv_size=config.mamba_conv_size
+        )
         
     raise NotImplementedError()
 
 def build_optimizer(params, config):
-    match config.optimizer:
-        case 'SGD':
-            return torch.optim.SGD(
-                params=params, 
-                lr=config.learning_rate, 
-                weight_decay=config.weight_decay
-            )
+    if config.optimizer == 'SGD':
+        return torch.optim.SGD(
+            params=params, 
+            lr=config.learning_rate, 
+            weight_decay=config.weight_decay
+        )
 
     raise NotImplementedError()
 
 # step, onecycle, cosine_annealing
 def build_lr_scheduler(optimizer, config):
-    match config.learning_rate_scheduler:
-        case 'step': 
-            return torch.optim.lr_scheduler.StepLR(
-                optimizer=optimizer, 
-                step_size=config.scheduler_step, 
-                gamma=config.scheduler_gamma
-            )
-        case 'onecycle':
-            return torch.optim.lr_scheduler.OneCycleLR(
-                optimizer=optimizer, 
-                step_size=config.scheduler_step, 
-                gamma=config.scheduler_gamma
-            )
-        case 'cosine_annealing':
-            return torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer=optimizer,
-                step_size=config.scheduler_step, 
-                gamma=config.scheduler_gamma
-            )
+    if config.learning_rate_scheduler == 'step':
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer=optimizer, 
+            step_size=config.scheduler_step, 
+            gamma=config.scheduler_gamma
+        )
+    elif config.learning_rate_scheduler == 'onecycle':
+        return torch.optim.lr_scheduler.OneCycleLR(
+            optimizer=optimizer, 
+            step_size=config.scheduler_step, 
+            gamma=config.scheduler_gamma
+        )
+    elif config.learning_rate_scheduler == 'cosine_annealing':
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer=optimizer,
+            step_size=config.scheduler_step, 
+            gamma=config.scheduler_gamma
+        )
 
     raise NotImplementedError()
 
